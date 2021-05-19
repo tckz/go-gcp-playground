@@ -3,16 +3,15 @@ package main
 import (
 	"context"
 	"flag"
-	"io"
 	"math/rand"
 	"os"
 	"os/signal"
 	"path/filepath"
-	"sync/atomic"
 	"syscall"
 	"time"
 
 	"cloud.google.com/go/pubsub"
+	"github.com/go-redis/redis/v8"
 	"github.com/joho/godotenv"
 	"github.com/patrickmn/go-cache"
 	vegeta "github.com/tsenart/vegeta/lib"
@@ -31,6 +30,8 @@ var (
 	optWorkers      = flag.Uint64("workers", vegeta.DefaultWorkers, "Number of workers")
 	optLogLevel     = flag.String("log-level", "info", "info|warn|error")
 	optSubscription = flag.String("subscription", "", "subscription name")
+	optRedis        = flag.String("redis", "", "addr:port of redis")
+	optCounterKey   = flag.String("counter-key", "subscriber-counter", "key of redis")
 )
 
 func init() {
@@ -75,27 +76,6 @@ func init() {
 
 }
 
-type nopWriteCloser struct {
-	io.Writer
-}
-
-func (c nopWriteCloser) Close() error {
-	return nil
-}
-
-func openResultFile(out string) (io.WriteCloser, error) {
-	switch out {
-	case "stdout":
-		return &nopWriteCloser{os.Stdout}, nil
-	default:
-		return os.Create(out)
-	}
-}
-
-type MyKind struct {
-	Name string
-}
-
 func main() {
 	logger.Infof("ver=%s, args=%s", version, os.Args)
 	defer logger.Infof("done")
@@ -115,21 +95,42 @@ func main() {
 	}
 	defer cl.Close()
 
-	sig := make(chan os.Signal, 1)
-	signal.Notify(sig, syscall.SIGINT)
+	var counter Counter
+	var processMarker ProcessMarker
+	if *optRedis == "" {
+		counter = &LocalCounter{}
+		processMarker = &LocalMarker{cache: cache.New(1*time.Minute, 1*time.Minute)}
+	} else {
+		cl := redis.NewUniversalClient(&redis.UniversalOptions{
+			Addrs:        []string{*optRedis},
+			DialTimeout:  time.Second * 2,
+			ReadTimeout:  time.Second * 2,
+			WriteTimeout: time.Second * 2,
+			PoolSize:     200,
+			PoolTimeout:  time.Second * 5,
+		})
+		defer cl.Close()
+		counter = &RedisCounter{key: *optCounterKey, client: cl}
+		processMarker = &RedisMarker{client: cl}
+	}
 
-	c := cache.New(1*time.Minute, 1*time.Minute)
 	eg, ctx := errgroup.WithContext(ctx)
-	var ctReceived int64
 	for i := uint64(0); i < *optWorkers; i++ {
 		eg.Go(func() error {
 			subs := cl.Subscription(*optSubscription)
 			return subs.Receive(ctx, func(ctx context.Context, msg *pubsub.Message) {
-				if err := c.Add(msg.ID, "", 0); err != nil {
-					logger.Infof("ID=%s already processed", msg.ID)
+				if got, err := processMarker.Acquire(ctx, msg.ID); err != nil {
+					logger.Errorf("ProcessCheck: %v", err)
+					return
+				} else if !got {
+					logger.Infof("msgID=%s already marked to be processed by other", msg.ID)
 					return
 				}
-				if n := atomic.AddInt64(&ctReceived, 1); n%1000 == 0 {
+
+				if n, err := counter.Up(ctx); err != nil {
+					logger.Errorf("Up: %v", err)
+					return
+				} else if n%1000 == 0 {
 					logger.Infof("received=%d", n)
 				}
 				msg.Ack()
@@ -137,11 +138,14 @@ func main() {
 		})
 	}
 
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, syscall.SIGINT)
+
 	s := <-sig
-	logger.Infof("Receive signal: %v", s)
+	logger.Infof("Received signal: %v", s)
 	cancel()
 
-	logger.Infof("waiting goroutines exit")
+	logger.Infof("Waiting goroutines exit")
 	if err := eg.Wait(); err != nil {
 		logger.Errorf("Wait: %v", err)
 	}
