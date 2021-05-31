@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"flag"
 	"io"
 	"math/rand"
@@ -33,10 +32,11 @@ var (
 			Freq: 30,
 			Per:  1 * time.Second,
 		}}
-	optDuration = flag.Duration("duration", 10*time.Second, "Duration of the test [0 = forever]")
-	optOutput   = flag.String("output", "", "/path/to/results.bin or 'stdout'")
-	optWorkers  = flag.Uint64("workers", vegeta.DefaultWorkers, "Number of workers")
-	optLogLevel = flag.String("log-level", "info", "info|warn|error")
+	optDuration  = flag.Duration("duration", 10*time.Second, "Duration of the test [0 = forever]")
+	optOutput    = flag.String("output", "", "/path/to/results.bin or 'stdout'")
+	optWorkers   = flag.Uint64("workers", vegeta.DefaultWorkers, "Number of workers")
+	optLogLevel  = flag.String("log-level", "info", "info|warn|error")
+	optNameSpace = flag.String("ns", "", "namespace")
 )
 
 func init() {
@@ -121,24 +121,15 @@ func main() {
 	}
 	defer cl.Close()
 
-	parentKey := datastore.IDKey("mykind", 5644004762845184, nil)
 	atk := vh.NewAttacker(func(ctx context.Context) (result *vh.HitResult, retErr error) {
-		kind := "mychild"
+		kind := "mykind"
 		name := uuid.New().String()
-		key := datastore.NameKey(kind, name, parentKey)
+		key := datastore.NameKey(kind, name, nil)
+		key.Namespace = *optNameSpace
 		rec := MyKind{Name: "my name is " + name}
 		_, err := cl.Put(ctx, key, &rec)
 		if err != nil {
 			return nil, err
-		}
-
-		var rec2 MyKind
-		if err := cl.Get(ctx, key, &rec2); err != nil {
-			return nil, err
-		}
-
-		if rec2.Name != rec.Name {
-			return nil, errors.New("not match")
 		}
 
 		return result, nil

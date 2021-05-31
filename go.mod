@@ -17,4 +17,5 @@ require (
 	github.com/tsenart/vegeta v12.7.0+incompatible
 	go.uber.org/zap v1.16.0
 	golang.org/x/sync v0.0.0-20210220032951-036812b2e83c
+	google.golang.org/api v0.46.0
 )

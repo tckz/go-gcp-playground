@@ -3,13 +3,13 @@ package main
 import (
 	"context"
 	"flag"
-	"io"
 	"math/rand"
 	"os"
 	"path/filepath"
 	"time"
 
 	"cloud.google.com/go/datastore"
+	"github.com/google/uuid"
 	"github.com/joho/godotenv"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -22,8 +22,13 @@ var (
 )
 
 var (
-	optOutput   = flag.String("output", "", "/path/to/results.bin or 'stdout'")
-	optLogLevel = flag.String("log-level", "info", "info|warn|error")
+	optLogLevel          = flag.String("log-level", "info", "info|warn|error")
+	optAncestorNameSpace = flag.String("ancestor-ns", "", "ancestor namespace")
+	optAncestorKind      = flag.String("ancestor-kind", "", "ancestor kind")
+	optAncestorName      = flag.String("ancestor-name", "", "ancestor named key")
+	optNameSpace         = flag.String("ns", "", "namespace")
+	optName              = flag.String("name", "", "named key")
+	optKind              = flag.String("kind", "mykind", "namespace")
 )
 
 func init() {
@@ -61,40 +66,20 @@ func init() {
 
 	zl, err = zc.Build()
 	if err != nil {
-		logger.Fatalf("*** Failed to Build: %v", err)
+		logger.Fatalf("*** zap.Build: %v", err)
 	}
 
 	logger = zl.Sugar().With(zap.String("app", myName))
 
 }
 
-type nopWriteCloser struct {
-	io.Writer
-}
-
-func (c nopWriteCloser) Close() error {
-	return nil
-}
-
-func openResultFile(out string) (io.WriteCloser, error) {
-	switch out {
-	case "stdout":
-		return &nopWriteCloser{os.Stdout}, nil
-	default:
-		return os.Create(out)
-	}
-}
-
 type MyKind struct {
 	Name string
+	Time time.Time
 }
 
 func main() {
 	logger.Infof("ver=%s, args=%s", version, os.Args)
-
-	if *optOutput == "" {
-		logger.Fatalf("*** --output must be specified.")
-	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -107,11 +92,24 @@ func main() {
 	}
 	defer cl.Close()
 
-	out, err := openResultFile(*optOutput)
-	if err != nil {
-		logger.Fatal(err)
+	var parentKey *datastore.Key
+	if *optAncestorKind != "" {
+		parentKey = datastore.NameKey(*optAncestorKind, *optAncestorName, nil)
+		parentKey.Namespace = *optAncestorNameSpace
 	}
-	defer out.Close()
 
-	datastore.NewQuery("mychild").Start(datastore.Cursor{})
+	name := *optName
+	if name == "" {
+		name = uuid.New().String()
+	}
+	key := datastore.NameKey(*optKind, name, parentKey)
+	key.Namespace = *optNameSpace
+
+	rec := MyKind{
+		Name: "my name is " + name,
+		Time: time.Now().UTC(),
+	}
+	if _, err := cl.Put(ctx, key, &rec); err != nil {
+		logger.Errorf("Put: %v", err)
+	}
 }
