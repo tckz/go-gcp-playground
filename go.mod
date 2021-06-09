@@ -1,6 +1,6 @@
 module github.com/tckz/go-gcp-playground
 
-go 1.15
+go 1.16
 
 require (
 	cloud.google.com/go v0.82.0 // indirect

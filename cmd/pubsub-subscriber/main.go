@@ -149,4 +149,11 @@ func main() {
 	if err := eg.Wait(); err != nil {
 		logger.Errorf("Wait: %v", err)
 	}
+
+	{
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		v, _ := counter.Get(ctx)
+		logger.Infof("Counter=%d", v)
+	}
 }

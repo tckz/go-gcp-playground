@@ -13,6 +13,10 @@ type RedisCounter struct {
 	client redis.UniversalClient
 }
 
+func (c *RedisCounter) Get(ctx context.Context) (int64, error) {
+	return c.client.Get(ctx, c.key).Int64()
+}
+
 func (c *RedisCounter) Up(ctx context.Context) (int64, error) {
 	return c.client.IncrBy(ctx, c.key, 1).Result()
 }
