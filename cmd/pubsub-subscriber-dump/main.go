@@ -97,7 +97,7 @@ func main() {
 		eg.Go(func() error {
 			subs := cl.Subscription(*optSubscription)
 			return subs.Receive(ctx, func(ctx context.Context, msg *pubsub.Message) {
-				fmt.Fprintf(os.Stdout, "ID=%s, Data=%s\n", msg.ID, string(msg.Data))
+				fmt.Fprintf(os.Stdout, "ID=%s, Data=%s, Attr=%s\n", msg.ID, string(msg.Data), msg.Attributes)
 				msg.Ack()
 			})
 		})
