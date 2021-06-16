@@ -24,9 +24,10 @@ var (
 )
 
 var (
-	optLogLevel  = flag.String("log-level", "info", "info|warn|error")
-	optNameSpace = flag.String("ns", "", "namespace")
-	optKind      = flag.String("kind", "mykind", "namespace")
+	optLogLevel   = flag.String("log-level", "info", "info|warn|error")
+	optNameSpace  = flag.String("ns", "", "namespace")
+	optKind       = flag.String("kind", "mykind", "namespace")
+	optDisplayKey = flag.Bool("display-key", false, "")
 )
 
 func init() {
@@ -69,11 +70,6 @@ func init() {
 
 	logger = zl.Sugar().With(zap.String("app", myName))
 
-}
-
-type MyKind struct {
-	Name string
-	Time time.Time
 }
 
 func main() {
@@ -141,7 +137,7 @@ func main() {
 				if err := cl.DeleteMulti(ctxDel, keys); err != nil {
 					return err
 				}
-				logger.Infof("Try to delete %d keys, dur=%s", l, time.Since(now))
+				logger.Infof("Deleted %d keys, dur=%s", l, time.Since(now))
 				keys = keys[:0]
 				chReport <- l
 				return nil
@@ -169,11 +165,11 @@ func main() {
 		})
 	}
 
-	q := datastore.NewQuery(*optKind).Namespace(*optNameSpace)
+	// 型にマップするとdatastore側にある列がtype側にないとエラーになってしまってdelete目的の場合にいちいち合わせるのが面倒なのでkeyのみ扱う
+	q := datastore.NewQuery(*optKind).Namespace(*optNameSpace).KeysOnly()
 	it := cl.Run(ctx, q)
 	for {
-		var rec MyKind
-		key, err := it.Next(&rec)
+		key, err := it.Next(nil)
 		if err == iterator.Done {
 			break
 		}
@@ -181,7 +177,9 @@ func main() {
 			logger.Errorf("Next: %v", err)
 			return
 		}
-		fmt.Printf("Key=%v, MyKind=%+v\n", key, rec)
+		if *optDisplayKey {
+			fmt.Printf("Key=%v\n", key)
+		}
 		chKey <- key
 	}
 	close(chKey)
