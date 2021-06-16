@@ -24,6 +24,8 @@ var (
 var (
 	optLogLevel  = flag.String("log-level", "info", "info|warn|error")
 	optNameSpace = flag.String("ns", "", "namespace")
+	optName      = flag.String("name", "", "named key")
+	optKind      = flag.String("kind", "mykind", "namespace")
 )
 
 func init() {
@@ -87,9 +89,7 @@ func main() {
 	}
 	defer cl.Close()
 
-	kind := "myput"
-	name := "21c6bc95-288f-4a24-8fd0-12ab525da347"
-	key := datastore.NameKey(kind, name, nil)
+	key := datastore.NameKey(*optKind, *optName, nil)
 	key.Namespace = *optNameSpace
 
 	var rec MyKind
