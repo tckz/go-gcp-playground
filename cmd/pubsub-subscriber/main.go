@@ -14,9 +14,9 @@ import (
 	"github.com/go-redis/redis/v8"
 	"github.com/joho/godotenv"
 	"github.com/patrickmn/go-cache"
+	"github.com/tckz/go-gcp-playground/internal/log"
 	vegeta "github.com/tsenart/vegeta/lib"
 	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -40,40 +40,7 @@ func init() {
 
 	flag.Parse()
 
-	// Until log initialization complete, use default json logger instead of it.
-	zl, err := zap.NewProduction()
-	if err != nil {
-		panic(err)
-	}
-	logger = zl.Sugar().With(zap.String("app", myName))
-
-	encConfig := zap.NewProductionEncoderConfig()
-	encConfig.EncodeTime = zapcore.ISO8601TimeEncoder
-
-	var al zap.AtomicLevel
-	err = al.UnmarshalText([]byte(*optLogLevel))
-	if err != nil {
-		logger.With(zap.Error(err)).Fatalf("al.UnmarshalText: %s", *optLogLevel)
-	}
-
-	zc := zap.Config{
-		DisableCaller:     true,
-		DisableStacktrace: true,
-		Level:             al,
-		Development:       false,
-		Encoding:          "json",
-		EncoderConfig:     encConfig,
-		OutputPaths:       []string{"stderr"},
-		ErrorOutputPaths:  []string{"stderr"},
-	}
-
-	zl, err = zc.Build()
-	if err != nil {
-		logger.Fatalf("*** Failed to Build: %v", err)
-	}
-
-	logger = zl.Sugar().With(zap.String("app", myName))
-
+	logger = log.Must(log.NewLogger(log.WithLogLevel(*optLogLevel))).Sugar().With(zap.String("app", myName))
 }
 
 func main() {
