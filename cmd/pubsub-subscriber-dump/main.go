@@ -26,10 +26,12 @@ var (
 )
 
 var (
-	optWorkers      = flag.Uint64("workers", 8, "Number of workers")
+	optWorkers      = flag.Uint("workers", 8, "Number of workers")
 	optLogLevel     = flag.String("log-level", "info", "info|warn|error")
 	optSubscription = flag.String("subscription", "", "subscription name")
-	optOutPrefix    = flag.String("out-prefix", "out/out-", "path/to/prefix")
+
+	// out-prefixはworkerごとに別ファイル出力する際に使う
+	optOutPrefix = flag.String("out-prefix", "", "path/to/prefix")
 )
 
 func init() {
@@ -42,6 +44,7 @@ func init() {
 }
 
 func main() {
+	defer logger.Sync()
 	logger.Infof("ver=%s, args=%s", version, os.Args)
 	defer logger.Infof("done")
 
@@ -60,29 +63,47 @@ func main() {
 	}
 	defer cl.Close()
 
-	eg, ctx := errgroup.WithContext(ctx)
-	for i := uint64(0); i < *optWorkers; i++ {
-		index := i
-		eg.Go(func() error {
-			fn := filepath.Join(*optOutPrefix + fmt.Sprintf("%03d", index))
-			os.MkdirAll(filepath.Dir(fn), os.ModePerm)
-			fp, err := os.Create(fn)
-			if err != nil {
-				return err
+	egOut, _ := errgroup.WithContext(ctx)
+	ch := make(chan interface{}, *optWorkers)
+	if *optOutPrefix == "" {
+		egOut.Go(func() error {
+			enc := json.NewEncoder(os.Stdout)
+			for m := range ch {
+				enc.Encode(m)
 			}
-			defer fp.Close()
-			logger.Infof("out=%s", fn)
+			return nil
+		})
+	}
 
-			subs := cl.Subscription(*optSubscription)
-			enc := json.NewEncoder(fp)
-			return subs.Receive(ctx, func(ctx context.Context, msg *pubsub.Message) {
+	egSubs, ctx := errgroup.WithContext(ctx)
+	for i := uint(0); i < *optWorkers; i++ {
+		index := i
+		egSubs.Go(func() error {
+			var enc *json.Encoder
+			if *optOutPrefix != "" {
+				fn := filepath.Join(*optOutPrefix + fmt.Sprintf("%03d", index))
+				os.MkdirAll(filepath.Dir(fn), os.ModePerm)
+				fp, err := os.Create(fn)
+				if err != nil {
+					return err
+				}
+				defer fp.Close()
+				logger.Infof("out=%s", fn)
+				enc = json.NewEncoder(fp)
+			}
+
+			return cl.Subscription(*optSubscription).Receive(ctx, func(ctx context.Context, msg *pubsub.Message) {
 				msg.Ack()
 				m := map[string]interface{}{
 					"id":   msg.ID,
 					"data": string(msg.Data),
 					"attr": msg.Attributes,
 				}
-				enc.Encode(m)
+				if enc != nil {
+					enc.Encode(m)
+				} else {
+					ch <- m
+				}
 			})
 		})
 	}
@@ -90,13 +111,19 @@ func main() {
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGINT)
 
-	s := <-sig
-	logger.Infof("Received signal: %v", s)
-	cancel()
+	go func() {
+		s := <-sig
+		logger.Infof("Received signal: %v", s)
+		cancel()
+	}()
 
 	logger.Infof("Waiting goroutines exit")
-	if err := eg.Wait(); err != nil {
-		logger.Errorf("Wait: %v", err)
+	if err := egSubs.Wait(); err != nil {
+		logger.Errorf("egSubs.Wait: %v", err)
 	}
 
+	close(ch)
+	if err := egOut.Wait(); err != nil {
+		logger.Errorf("egOut.Wait: %v", err)
+	}
 }
