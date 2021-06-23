@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"math/rand"
@@ -14,7 +15,6 @@ import (
 	"cloud.google.com/go/pubsub"
 	"github.com/joho/godotenv"
 	"github.com/tckz/go-gcp-playground/internal/log"
-	vegeta "github.com/tsenart/vegeta/lib"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 )
@@ -26,9 +26,10 @@ var (
 )
 
 var (
-	optWorkers      = flag.Uint64("workers", vegeta.DefaultWorkers, "Number of workers")
+	optWorkers      = flag.Uint64("workers", 8, "Number of workers")
 	optLogLevel     = flag.String("log-level", "info", "info|warn|error")
 	optSubscription = flag.String("subscription", "", "subscription name")
+	optOutPrefix    = flag.String("out-prefix", "out/out-", "path/to/prefix")
 )
 
 func init() {
@@ -61,11 +62,27 @@ func main() {
 
 	eg, ctx := errgroup.WithContext(ctx)
 	for i := uint64(0); i < *optWorkers; i++ {
+		index := i
 		eg.Go(func() error {
+			fn := filepath.Join(*optOutPrefix + fmt.Sprintf("%03d", index))
+			os.MkdirAll(filepath.Dir(fn), os.ModePerm)
+			fp, err := os.Create(fn)
+			if err != nil {
+				return err
+			}
+			defer fp.Close()
+			logger.Infof("out=%s", fn)
+
 			subs := cl.Subscription(*optSubscription)
+			enc := json.NewEncoder(fp)
 			return subs.Receive(ctx, func(ctx context.Context, msg *pubsub.Message) {
-				fmt.Fprintf(os.Stdout, "ID=%s, Data=%s, Attr=%s\n", msg.ID, string(msg.Data), msg.Attributes)
 				msg.Ack()
+				m := map[string]interface{}{
+					"id":   msg.ID,
+					"data": string(msg.Data),
+					"attr": msg.Attributes,
+				}
+				enc.Encode(m)
 			})
 		})
 	}
