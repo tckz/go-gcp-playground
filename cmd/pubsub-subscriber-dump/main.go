@@ -3,12 +3,14 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"math/rand"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -29,6 +31,11 @@ var (
 	optWorkers      = flag.Uint("workers", 8, "Number of workers")
 	optLogLevel     = flag.String("log-level", "info", "info|warn|error")
 	optSubscription = flag.String("subscription", "", "subscription name")
+
+	optLogStep = flag.Int64("log-step", 1000, "")
+
+	// これを指定した場合得られたオブジェクトをdumpしない。EncodeもしないのでCPUパワーをセーブできる
+	optOutDiscard = flag.Bool("out-discard", false, "discard output")
 
 	// out-prefixはworkerごとに別ファイル出力する際に使う
 	optOutPrefix = flag.String("out-prefix", "", "path/to/prefix")
@@ -63,24 +70,41 @@ func main() {
 	}
 	defer cl.Close()
 
-	egOut, _ := errgroup.WithContext(ctx)
+	egOut, ctxOut := errgroup.WithContext(ctx)
 	ch := make(chan interface{}, *optWorkers)
-	if *optOutPrefix == "" {
-		egOut.Go(func() error {
-			enc := json.NewEncoder(os.Stdout)
-			for m := range ch {
-				enc.Encode(m)
+	outLoop := func(ctx context.Context, enc *json.Encoder) error {
+		for {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case v, ok := <-ch:
+				if !ok {
+					return nil
+				}
+				if err := enc.Encode(v); err != nil {
+					return err
+				}
 			}
-			return nil
-		})
+		}
 	}
-
-	egSubs, ctx := errgroup.WithContext(ctx)
-	for i := uint(0); i < *optWorkers; i++ {
-		index := i
-		egSubs.Go(func() error {
-			var enc *json.Encoder
-			if *optOutPrefix != "" {
+	if *optOutPrefix == "" {
+		egOut.Go(func() (retErr error) {
+			defer func() {
+				if retErr != nil {
+					cancel()
+				}
+			}()
+			return outLoop(ctxOut, json.NewEncoder(os.Stdout))
+		})
+	} else {
+		for i := uint(0); i < *optWorkers; i++ {
+			index := i
+			egOut.Go(func() (retErr error) {
+				defer func() {
+					if retErr != nil {
+						cancel()
+					}
+				}()
 				fn := filepath.Join(*optOutPrefix + fmt.Sprintf("%03d", index))
 				os.MkdirAll(filepath.Dir(fn), os.ModePerm)
 				fp, err := os.Create(fn)
@@ -89,41 +113,58 @@ func main() {
 				}
 				defer fp.Close()
 				logger.Infof("out=%s", fn)
-				enc = json.NewEncoder(fp)
-			}
-
-			return cl.Subscription(*optSubscription).Receive(ctx, func(ctx context.Context, msg *pubsub.Message) {
-				msg.Ack()
-				m := map[string]interface{}{
-					"id":   msg.ID,
-					"data": string(msg.Data),
-					"attr": msg.Attributes,
-				}
-				if enc != nil {
-					enc.Encode(m)
-				} else {
-					ch <- m
-				}
+				return outLoop(ctxOut, json.NewEncoder(fp))
 			})
-		})
+		}
 	}
 
-	sig := make(chan os.Signal, 1)
-	signal.Notify(sig, syscall.SIGINT)
+	egSubs, ctxSubs := errgroup.WithContext(ctx)
+	var count int64
+	egSubs.Go(func() error {
+		subs := cl.Subscription(*optSubscription)
+		subs.ReceiveSettings.NumGoroutines = int(*optWorkers)
+		return subs.Receive(ctxSubs, func(ctx context.Context, msg *pubsub.Message) {
+			msg.Ack()
+			n := atomic.AddInt64(&count, 1)
+			if *optLogStep > 0 && n%*optLogStep == 0 {
+				logger.Infof("count=%d", n)
+			}
+
+			if *optOutDiscard {
+				return
+			}
+
+			m := map[string]interface{}{
+				"id":   msg.ID,
+				"data": string(msg.Data),
+				"attr": msg.Attributes,
+			}
+
+			select {
+			case <-ctx.Done():
+				cancel()
+				return
+			case ch <- m:
+			}
+		})
+	})
 
 	go func() {
+		sig := make(chan os.Signal, 1)
+		signal.Notify(sig, syscall.SIGINT)
+
 		s := <-sig
 		logger.Infof("Received signal: %v", s)
 		cancel()
 	}()
 
-	logger.Infof("Waiting goroutines exit")
-	if err := egSubs.Wait(); err != nil {
+	if err := egSubs.Wait(); err != nil && !errors.Is(err, context.Canceled) {
 		logger.Errorf("egSubs.Wait: %v", err)
 	}
+	logger.Infof("received total=%d", count)
 
 	close(ch)
-	if err := egOut.Wait(); err != nil {
+	if err := egOut.Wait(); err != nil && !errors.Is(err, context.Canceled) {
 		logger.Errorf("egOut.Wait: %v", err)
 	}
 }
