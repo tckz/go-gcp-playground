@@ -33,6 +33,7 @@ var (
 	optSubscription = flag.String("subscription", "", "subscription name")
 
 	optLogStep = flag.Int64("log-step", 1000, "")
+	optTicker  = flag.Duration("ticker", 1*time.Minute, "")
 
 	// これを指定した場合得られたオブジェクトをdumpしない。EncodeもしないのでCPUパワーをセーブできる
 	optOutDiscard = flag.Bool("out-discard", false, "discard output")
@@ -156,6 +157,19 @@ func main() {
 		s := <-sig
 		logger.Infof("Received signal: %v", s)
 		cancel()
+	}()
+
+	go func() {
+		t := time.NewTicker(*optTicker)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				logger.Infof("tick:count=%d", count)
+			}
+		}
 	}()
 
 	if err := egSubs.Wait(); err != nil && !errors.Is(err, context.Canceled) {
