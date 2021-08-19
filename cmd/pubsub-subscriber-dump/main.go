@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"math/rand"
 	"os"
 	"os/signal"
@@ -38,6 +39,8 @@ var (
 	// これを指定した場合得られたオブジェクトをdumpしない。EncodeもしないのでCPUパワーをセーブできる
 	optOutDiscard = flag.Bool("out-discard", false, "discard output")
 
+	optRaw = flag.Bool("raw", false, "dump raw body only")
+
 	// out-prefixはworkerごとに別ファイル出力する際に使う
 	optOutPrefix = flag.String("out-prefix", "", "path/to/prefix")
 )
@@ -50,6 +53,8 @@ func init() {
 
 	logger = log.Must(log.NewLogger(log.WithLogLevel(*optLogLevel))).Sugar().With(zap.String("app", myName))
 }
+
+type encodeFunc func(v interface{}) error
 
 func main() {
 	defer logger.Sync()
@@ -73,7 +78,7 @@ func main() {
 
 	egOut, ctxOut := errgroup.WithContext(ctx)
 	ch := make(chan interface{}, *optWorkers)
-	outLoop := func(ctx context.Context, enc *json.Encoder) error {
+	outLoop := func(ctx context.Context, f encodeFunc) error {
 		for {
 			select {
 			case <-ctx.Done():
@@ -82,12 +87,25 @@ func main() {
 				if !ok {
 					return nil
 				}
-				if err := enc.Encode(v); err != nil {
+				if err := f(v); err != nil {
 					return err
 				}
 			}
 		}
 	}
+
+	genEncodeFunc := func(w io.Writer) encodeFunc {
+		if *optRaw {
+			return func(v interface{}) error {
+				w.Write(v.([]byte))
+				w.Write([]byte("\n"))
+				return err
+			}
+		} else {
+			return json.NewEncoder(w).Encode
+		}
+	}
+
 	if *optOutPrefix == "" {
 		egOut.Go(func() (retErr error) {
 			defer func() {
@@ -95,7 +113,7 @@ func main() {
 					cancel()
 				}
 			}()
-			return outLoop(ctxOut, json.NewEncoder(os.Stdout))
+			return outLoop(ctxOut, genEncodeFunc(os.Stdout))
 		})
 	} else {
 		for i := uint(0); i < *optWorkers; i++ {
@@ -114,7 +132,7 @@ func main() {
 				}
 				defer fp.Close()
 				logger.Infof("out=%s", fn)
-				return outLoop(ctxOut, json.NewEncoder(fp))
+				return outLoop(ctxOut, genEncodeFunc(fp))
 			})
 		}
 	}
@@ -135,10 +153,15 @@ func main() {
 				return
 			}
 
-			m := map[string]interface{}{
-				"id":   msg.ID,
-				"data": string(msg.Data),
-				"attr": msg.Attributes,
+			var m interface{}
+			if *optRaw {
+				m = msg.Data
+			} else {
+				m = map[string]interface{}{
+					"id":   msg.ID,
+					"data": string(msg.Data),
+					"attr": msg.Attributes,
+				}
 			}
 
 			select {
