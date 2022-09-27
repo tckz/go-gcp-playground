@@ -15,7 +15,9 @@ import (
 
 // https://cloud.google.com/run/docs/authenticating/service-to-service
 // 指定audienceでIDトークン発行
-// 発行する権限はGOOGLE_APPLICATION_CREDENTIALSなどで指定
+// 指定SAへのimpersonationを行う
+// 発行する側の権限はGOOGLE_APPLICATION_CREDENTIALSなどで指定。この権限には、指定SAへのimpersonate権限＝serviceAccountTokenCreatorが必要
+// 発行する側はSAでもユーザーでもよい
 
 var (
 	optSA       = flag.String("sa", "", "sub of id token to be issued")
@@ -38,13 +40,12 @@ func main() {
 	ctx := context.Background()
 
 	// https://cloud.google.com/iam/docs/reference/credentials/rest/v1/projects.serviceAccounts/generateIdToken
-	creds, err := google.FindDefaultCredentials(ctx, "https://www.googleapis.com/auth/cloud-platform")
+	ts, err := google.DefaultTokenSource(ctx, "https://www.googleapis.com/auth/cloud-platform")
 	if err != nil {
-		log.Fatalf("google.FindDefaultCredentials: %v", err)
+		log.Fatalf("google.DefaultTokenSource: %v", err)
 	}
-	fmt.Println(string(creds.JSON))
 
-	c, err := credentials.NewIamCredentialsClient(ctx, option.WithCredentials(creds))
+	c, err := credentials.NewIamCredentialsClient(ctx, option.WithTokenSource(ts))
 	if err != nil {
 		log.Fatalf("credentials.NewIamCredentialsClient: %v", err)
 	}

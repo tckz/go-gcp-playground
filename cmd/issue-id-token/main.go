@@ -12,7 +12,10 @@ import (
 
 // https://cloud.google.com/run/docs/authenticating/service-to-service
 // 指定audienceでIDトークン発行
-// 発行する権限はGOOGLE_APPLICATION_CREDENTIALSなどで指定
+// 発行する側の権限はGOOGLE_APPLICATION_CREDENTIALSなどで指定
+
+// 発行する側はSAである必要がある。
+// idtoken: credential must be service_account, found "authorized_user"
 
 var (
 	optAudience = flag.String("audience", "", "aud of id token to be issued")
