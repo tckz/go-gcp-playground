@@ -2,9 +2,9 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
-	"math/rand"
 	"os"
 	"path/filepath"
 	"time"
@@ -32,7 +32,6 @@ var (
 
 func init() {
 	godotenv.Load()
-	rand.Seed(time.Now().UnixNano())
 
 	flag.Parse()
 
@@ -137,7 +136,7 @@ func main() {
 	it := cl.Run(ctx, q)
 	for {
 		key, err := it.Next(nil)
-		if err == iterator.Done {
+		if errors.Is(err, iterator.Done) {
 			break
 		}
 		if err != nil {

@@ -7,7 +7,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"math/rand"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -47,7 +46,6 @@ var (
 
 func init() {
 	godotenv.Load()
-	rand.Seed(time.Now().UnixNano())
 
 	flag.Parse()
 

@@ -4,7 +4,6 @@ import (
 	"context"
 	"flag"
 	"io"
-	"math/rand"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -16,7 +15,7 @@ import (
 	"github.com/joho/godotenv"
 	"github.com/tckz/go-gcp-playground/internal/log"
 	vh "github.com/tckz/vegetahelper"
-	vegeta "github.com/tsenart/vegeta/lib"
+	vegeta "github.com/tsenart/vegeta/v12/lib"
 	"go.uber.org/zap"
 )
 
@@ -41,7 +40,6 @@ var (
 
 func init() {
 	godotenv.Load()
-	rand.Seed(time.Now().UnixNano())
 
 	flag.Var(optRate, "rate", "Number of requests per time unit")
 	flag.Parse()

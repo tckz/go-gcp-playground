@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"flag"
-	"math/rand"
 	"os"
 	"path/filepath"
 	"time"
@@ -33,7 +32,6 @@ var (
 
 func init() {
 	godotenv.Load()
-	rand.Seed(time.Now().UnixNano())
 
 	flag.Parse()
 
