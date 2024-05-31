@@ -16,6 +16,8 @@ import (
 
 // 発行する側はSAである必要がある。
 // idtoken: credential must be service_account, found "authorized_user"
+// 2024/05/31: 以前は↑こうだったが、↓のようなエラーに
+// idtoken: unsupported credentials type
 
 var (
 	optAudience = flag.String("audience", "", "aud of id token to be issued")
