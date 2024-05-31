@@ -10,9 +10,9 @@ import (
 	"time"
 
 	"cloud.google.com/go/pubsub"
-	"github.com/go-redis/redis/v8"
 	"github.com/joho/godotenv"
 	"github.com/patrickmn/go-cache"
+	"github.com/redis/go-redis/v9"
 	"github.com/tckz/go-gcp-playground/internal/log"
 	vegeta "github.com/tsenart/vegeta/v12/lib"
 	"go.uber.org/zap"
